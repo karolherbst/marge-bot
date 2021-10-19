@@ -9,6 +9,7 @@ from collections import namedtuple
 
 
 from . import trailerfilter
+from . import sobfilter
 
 # Turning off StrictHostKeyChecking is a nasty hack to approximate
 # just accepting the hostkey sight unseen the first time marge
@@ -29,6 +30,12 @@ def _filter_branch_script(trailer_name, trailer_values):
     )
     return filter_script
 
+def _sob_branch_script(sob_value):
+    sob_script = 'SOB={sob_value} python3 {script}'.format(
+        sob_value=shlex.quote(sob_value),
+        script=sobfilter.__file__,
+    )
+    return sob_script
 
 class Repo(namedtuple('Repo', 'remote_url local_path ssh_key_file timeout reference')):
     def clone(self):
@@ -63,6 +70,29 @@ class Repo(namedtuple('Repo', 'remote_url local_path ssh_key_file timeout refere
         try:
             # --force = overwrite backup of last filter-branch
             self.git('filter-branch', '--force', '--msg-filter', filter_script, commit_range)
+        except GitError:
+            log.warning('filter-branch failed, will try to restore')
+            try:
+                self.get_commit_hash('refs/original/refs/heads/')
+            except GitError:
+                log.warning('No changes have been effected by filter-branch')
+            else:
+                self.git('reset', '--hard', 'refs/original/refs/heads/' + branch)
+            raise
+        return self.get_commit_hash()
+
+    def tag_with_sob(self, value, branch, start_commit):
+        """Adds a Signed-by-off tag with the given `value` if it's missing and removes all trailing ones.
+        """
+
+        # Strips all `$trailer_name``: lines and trailing newlines, adds an empty
+        # newline and tags on the `$trailer_name: $trailer_value` for each `trailer_value` in
+        # `trailer_values`.
+        sob_script = _sob_branch_script(value)
+        commit_range = start_commit + '..' + branch
+        try:
+            # --force = overwrite backup of last filter-branch
+            self.git('filter-branch', '--force', '--msg-filter', sob_script, commit_range)
         except GitError:
             log.warning('filter-branch failed, will try to restore')
             try:

@@ -153,6 +153,11 @@ def _parse_config(args):
         help='Marge-bot pushes effectively don\'t change approval status.\n',
     )
     parser.add_argument(
+        '--add-sob',
+        action='store_true',
+        help='Add "Signed-off-by: $maintainer" forthe person assigning to marge.\n'
+    )
+    parser.add_argument(
         '--merge-order',
         default='created_at',
         choices=('created_at', 'updated_at', 'assigned_at'),
@@ -334,6 +339,7 @@ def main(args=None):
                 add_tested=options.add_tested,
                 add_part_of=options.add_part_of,
                 add_reviewers=options.add_reviewers,
+                add_sob=options.add_sob,
                 reapprove=options.impersonate_approvers,
                 approval_timeout=options.approval_reset_timeout,
                 embargo=options.embargo,

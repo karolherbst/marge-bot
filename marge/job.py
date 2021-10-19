@@ -12,7 +12,9 @@ from .merge_request import MergeRequestRebaseFailed
 from .project import Project
 from .user import User
 from .pipeline import Pipeline
+from pprint import pprint
 
+GET = gitlab.GET
 
 class MergeJob:
 
@@ -126,17 +128,50 @@ class MergeJob:
             self._options.fusion is not Fusion.gitlab_rebase
         )
         part_of = (
-            '<{0.web_url}>'.format(merge_request)
+            '{0.web_url}'.format(merge_request)
             if should_add_parts_of
             else None
         )
         if part_of is not None:
             sha = self._repo.tag_with_trailer(
-                trailer_name='Part-of',
+                trailer_name='Link',
                 trailer_values=[part_of],
                 branch=merge_request.source_branch,
                 start_commit='origin/' + merge_request.target_branch,
             )
+
+        # add Signed-off-by
+        should_add_sob = (
+            self._options.add_sob and
+            self._options.fusion is not Fusion.gitlab_rebase
+        )
+        if should_add_sob:
+            notes = self._api.call(GET(
+                '/projects/{project_id}/merge_requests/{merge_request_id}/notes'.format(
+                    project_id=merge_request.target_project_id,
+                    merge_request_id=merge_request.iid,
+                ),
+                {
+                    'order_by': 'created_at',
+                    'sort': 'desc',
+                }
+            ))
+
+            maintainers = {
+                'karolherbst': 'Karol Herbst <kherbst@redhat.com>',
+                'skeggsb': 'Ben Skeggs <bskeggs@redhat.com>',
+                'lyudess': 'Lyude Paul <lyude@redhat.com>',
+            }
+            filtered_note = [note for note in notes if note['system'] and 'assigned to @{0._user.username}'.format(self) in note['body']][0]
+            pprint(filtered_note)
+
+            sob = maintainers[filtered_note['author']['username']]
+            sha = self._repo.tag_with_sob(
+                value=sob,
+                branch=merge_request.source_branch,
+                start_commit='origin/' + merge_request.target_branch,
+            )
+
         return sha
 
     def get_mr_ci_status(self, merge_request, commit_sha=None):
@@ -265,7 +300,7 @@ class MergeJob:
         source_project = self.get_source_project(merge_request)
         if source_project is not self._project:
             remote = 'source'
-            remote_url = source_project.ssh_url_to_repo
+            remote_url = source_project.http_url_to_repo
             self._repo.fetch(
                 remote_name=remote,
                 remote_url=remote_url,
@@ -452,6 +487,7 @@ JOB_OPTIONS = [
     'add_tested',
     'add_part_of',
     'add_reviewers',
+    'add_sob',
     'reapprove',
     'approval_timeout',
     'embargo',
@@ -468,12 +504,12 @@ class MergeJobOptions(namedtuple('MergeJobOptions', JOB_OPTIONS)):
 
     @property
     def requests_commit_tagging(self):
-        return self.add_tested or self.add_part_of or self.add_reviewers
+        return self.add_tested or self.add_part_of or self.add_reviewers or self.add_sob
 
     @classmethod
     def default(
             cls, *,
-            add_tested=False, add_part_of=False, add_reviewers=False, reapprove=False,
+            add_tested=False, add_part_of=False, add_reviewers=False, add_sob=False, reapprove=False,
             approval_timeout=None, embargo=None, ci_timeout=None, fusion=Fusion.rebase,
             use_no_ff_batches=False, use_merge_commit_batches=False, skip_ci_batches=False,
     ):
@@ -484,6 +520,7 @@ class MergeJobOptions(namedtuple('MergeJobOptions', JOB_OPTIONS)):
             add_tested=add_tested,
             add_part_of=add_part_of,
             add_reviewers=add_reviewers,
+            add_sob=add_sob,
             reapprove=reapprove,
             approval_timeout=approval_timeout,
             embargo=embargo,
